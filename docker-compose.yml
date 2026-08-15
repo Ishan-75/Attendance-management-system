@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # Production PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: attendance_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-attendance_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-attendance_secure_pass_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-attendance_db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-attendance_user} -d ${POSTGRES_DB:-attendance_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - attendance_net
+
+  # FastAPI Backend Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: attendance_backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-attendance_user}:${POSTGRES_PASSWORD:-attendance_secure_pass_2026}@db:5432/${POSTGRES_DB:-attendance_db}
+      SECRET_KEY: ${SECRET_KEY:-b8f9e6d2a4c1f7e8b9d0c3a5e7f1b2c4d6e8f0a2b4c6d8e0f2a4c6e8b0d2f4a6}
+      ACCESS_TOKEN_EXPIRE_MINUTES: 480
+      ALLOWED_ORIGINS: "http://localhost,http://localhost:80,http://localhost:3000,http://127.0.0.1"
+      TIMEZONE: "Asia/Kolkata"
+      BACKUP_DIR: "/app/backups"
+      ENVIRONMENT: "production"
+    volumes:
+      - backend_backups:/app/backups
+    ports:
+      - "8000:8000"
+    networks:
+      - attendance_net
+
+  # React Frontend + Nginx Reverse Proxy
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: attendance_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - attendance_net
+
+volumes:
+  pgdata:
+    driver: local
+  backend_backups:
+    driver: local
+
+networks:
+  attendance_net:
+    driver: bridge

@@ -14,6 +14,19 @@ def test_admin_login_success(client):
     assert data["data"]["user"]["role"] == "ADMIN"
 
 
+def test_rajavelu_default_account_login(client):
+    res = client.post("/api/v1/auth/login", json={
+        "username_or_email": "Rajavelu",
+        "password": "Rajavelu@123"
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert "access_token" in data["data"]
+    assert data["data"]["user"]["username"] == "Rajavelu"
+    assert data["data"]["user"]["role"] == "ADMIN"
+
+
 def test_login_invalid_password(client):
     res = client.post("/api/v1/auth/login", json={
         "username_or_email": "Rajavel",

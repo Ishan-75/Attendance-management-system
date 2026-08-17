@@ -30,7 +30,32 @@ def init_db(db: Optional[Session] = None) -> None:
         should_close = True
 
     try:
-        # 2. Check or create Super Admin 'Rajavel'
+        # 2. Check or create default user 'Rajavelu'
+        rajavelu_user = db.query(User).filter(
+            (User.username == "Rajavelu") | (User.email == "rajavelu@attendance.local")
+        ).first()
+        
+        if not rajavelu_user:
+            rajavelu_user = User(
+                username="Rajavelu",
+                full_name="Rajavelu",
+                email="rajavelu@attendance.local",
+                password_hash=get_password_hash("Rajavelu@123"),
+                role=UserRole.ADMIN,
+                is_active=True,
+                is_email_verified=True,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            )
+            db.add(rajavelu_user)
+            logger.info("Created default user account (username: Rajavelu, password: Rajavelu@123)")
+        else:
+            rajavelu_user.username = "Rajavelu"
+            rajavelu_user.role = UserRole.ADMIN
+            rajavelu_user.is_active = True
+            rajavelu_user.password_hash = get_password_hash("Rajavelu@123")
+
+        # 3. Check or create Super Admin 'Rajavel'
         admin_user = db.query(User).filter(
             (User.username == "Rajavel") | (User.email == "attendancesystem55@gmail.com")
         ).first()

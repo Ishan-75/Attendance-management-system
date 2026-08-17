@@ -11,7 +11,7 @@ from app.schemas.employee import (
 )
 from app.schemas.common import APIResponse, PaginatedResponse
 from app.services.employee_service import EmployeeService
-from app.api.v1.deps import require_manager, get_current_user, get_client_ip
+from app.api.v1.deps import require_manager, get_current_user, get_client_ip, require_admin
 from app.models.user import User
 
 router = APIRouter(prefix="/employees", tags=["Employees"])
@@ -119,7 +119,7 @@ def update_employee_status(
 def delete_employee(
     request: Request,
     employee_id: int,
-    user: User = Depends(require_manager),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
     ip = get_client_ip(request)

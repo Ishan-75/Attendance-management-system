@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # CORS
     FRONTEND_URL: str = "http://localhost:5173"
     BACKEND_URL: str = "http://localhost:8000"
-    CORS_ORIGINS: Union[List[str], str] = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: Union[List[str], str] = ["http://localhost:5173", "http://localhost:3000", "*", "https://*.vercel.app"]
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

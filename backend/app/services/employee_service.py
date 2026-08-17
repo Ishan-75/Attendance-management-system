@@ -77,17 +77,32 @@ class EmployeeService:
         return employee
 
     @staticmethod
+    @staticmethod
     def create_employee(
         db: Session,
         emp_in: EmployeeCreate,
         user: User,
         ip_address: Optional[str] = None
     ) -> Employee:
-        """Create new employee with validation and audit logging."""
-        # 1. Verify Department exists and is active
-        dept = db.query(Department).filter(Department.id == emp_in.department_id).first()
-        if not dept:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department does not exist")
+        """Create new employee with optional instant department creation."""
+        # 1. Handle Department assignment (or instant creation)
+        dept_id = None
+        dept_name = "General"
+        if emp_in.new_department_name and emp_in.new_department_name.strip():
+            target_name = emp_in.new_department_name.strip()
+            dept = db.query(Department).filter(Department.name == target_name).first()
+            if not dept:
+                dept = Department(name=target_name, description="Created during employee creation", is_active=True)
+                db.add(dept)
+                db.flush()
+            dept_id = dept.id
+            dept_name = dept.name
+        elif emp_in.department_id:
+            dept = db.query(Department).filter(Department.id == emp_in.department_id).first()
+            if not dept:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected department does not exist")
+            dept_id = dept.id
+            dept_name = dept.name
 
         # 2. Determine or validate employee_id
         emp_code = emp_in.employee_id.strip() if emp_in.employee_id else EmployeeService.generate_next_employee_id(db)
@@ -99,30 +114,37 @@ class EmployeeService:
                 detail=f"Employee with ID '{emp_code}' already exists."
             )
 
-        # Check duplicate email
-        if db.query(Employee).filter(Employee.email == emp_in.email.lower()).first():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Employee with email '{emp_in.email}' already exists."
-            )
+        # Auto-assign internal email if omitted to satisfy legacy NOT NULL constraints
+        email_val = emp_in.email.strip().lower() if emp_in.email and emp_in.email.strip() else f"{emp_code.lower()}@attendance.local"
+        if emp_in.email and emp_in.email.strip():
+            if db.query(Employee).filter(Employee.email == email_val).first():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Employee with email '{email_val}' already exists."
+                )
 
-        full_name = f"{emp_in.first_name.strip()} {emp_in.last_name.strip()}".strip()
+        first_name_clean = emp_in.first_name.strip()
+        last_name_clean = emp_in.last_name.strip() if emp_in.last_name else ""
+        full_name = f"{first_name_clean} {last_name_clean}".strip() if last_name_clean else first_name_clean
+
+        from app.core.timezone import get_current_date
+        join_date = emp_in.joining_date or get_current_date()
 
         employee = Employee(
             employee_id=emp_code,
-            first_name=emp_in.first_name.strip(),
-            last_name=emp_in.last_name.strip(),
+            first_name=first_name_clean,
+            last_name=last_name_clean,  # Empty string satisfies SQLite NOT NULL constraint
             full_name=full_name,
-            email=emp_in.email.lower(),
+            email=email_val,
             phone=emp_in.phone.strip() if emp_in.phone else None,
-            department_id=emp_in.department_id,
-            designation=emp_in.designation.strip(),
-            joining_date=emp_in.joining_date,
-            employment_type=emp_in.employment_type,
-            status=emp_in.status,
+            department_id=dept_id,
+            designation=emp_in.designation.strip() if emp_in.designation else "Staff",
+            joining_date=join_date,
+            employment_type=emp_in.employment_type or "FULL_TIME",
+            status=emp_in.status or "ACTIVE",
             profile_photo=emp_in.profile_photo,
-            address=emp_in.address,
-            emergency_contact=emp_in.emergency_contact
+            address=emp_in.address or "",
+            emergency_contact=emp_in.emergency_contact or ""
         )
 
         db.add(employee)
@@ -131,14 +153,14 @@ class EmployeeService:
         AuditService.log(
             db,
             action=AuditAction.EMPLOYEE_CREATED,
-            description=f"Created employee {employee.full_name} ({employee.employee_id}) in department {dept.name}",
+            description=f"Created employee {employee.full_name} ({employee.employee_id}) in department {dept_name}",
             user_id=user.id,
             entity_type="Employee",
             entity_id=str(employee.id),
             new_value={
                 "employee_id": employee.employee_id,
                 "full_name": employee.full_name,
-                "email": employee.email,
+                "phone": employee.phone,
                 "department_id": employee.department_id,
                 "status": employee.status
             },
@@ -159,37 +181,43 @@ class EmployeeService:
     ) -> Employee:
         """Update employee details with audit logging."""
         employee = EmployeeService.get_employee_by_id(db, employee_id)
-        old_data = {
-            "first_name": employee.first_name,
-            "last_name": employee.last_name,
-            "email": employee.email,
-            "phone": employee.phone,
-            "department_id": employee.department_id,
-            "designation": employee.designation,
-            "status": employee.status
-        }
 
-        # Check unique email if changing
-        if emp_in.email and emp_in.email.lower() != employee.email:
-            existing = db.query(Employee).filter(
-                Employee.email == emp_in.email.lower(),
-                Employee.id != employee_id
-            ).first()
-            if existing:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already used by another employee")
-            employee.email = emp_in.email.lower()
-
-        if emp_in.department_id and emp_in.department_id != employee.department_id:
-            dept = db.query(Department).filter(Department.id == emp_in.department_id).first()
+        # Handle instant department creation on update
+        if emp_in.new_department_name and emp_in.new_department_name.strip():
+            target_name = emp_in.new_department_name.strip()
+            dept = db.query(Department).filter(Department.name == target_name).first()
             if not dept:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department does not exist")
-            employee.department_id = emp_in.department_id
+                dept = Department(name=target_name, description="Created during employee update", is_active=True)
+                db.add(dept)
+                db.flush()
+            employee.department_id = dept.id
+        elif emp_in.department_id is not None:
+            if emp_in.department_id > 0:
+                dept = db.query(Department).filter(Department.id == emp_in.department_id).first()
+                if not dept:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department does not exist")
+                employee.department_id = emp_in.department_id
+            else:
+                employee.department_id = None
+
+        if emp_in.email is not None:
+            email_clean = emp_in.email.strip().lower() if emp_in.email.strip() else None
+            if email_clean and email_clean != employee.email:
+                existing = db.query(Employee).filter(
+                    Employee.email == email_clean,
+                    Employee.id != employee_id
+                ).first()
+                if existing:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already used by another employee")
+            employee.email = email_clean
 
         if emp_in.first_name:
             employee.first_name = emp_in.first_name.strip()
-        if emp_in.last_name:
-            employee.last_name = emp_in.last_name.strip()
-        employee.full_name = f"{employee.first_name} {employee.last_name}".strip()
+        if emp_in.last_name is not None:
+            employee.last_name = emp_in.last_name.strip() if emp_in.last_name else ""
+        
+        last_str = employee.last_name or ""
+        employee.full_name = f"{employee.first_name} {last_str}".strip() if last_str else employee.first_name
 
         if emp_in.phone is not None:
             employee.phone = emp_in.phone.strip() if emp_in.phone else None
@@ -215,14 +243,11 @@ class EmployeeService:
             user_id=user.id,
             entity_type="Employee",
             entity_id=str(employee.id),
-            old_value=old_data,
             new_value={
                 "first_name": employee.first_name,
-                "last_name": employee.last_name,
-                "email": employee.email,
+                "full_name": employee.full_name,
                 "phone": employee.phone,
                 "department_id": employee.department_id,
-                "designation": employee.designation,
                 "status": employee.status
             },
             ip_address=ip_address

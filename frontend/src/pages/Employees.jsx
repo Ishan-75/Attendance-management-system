@@ -24,7 +24,9 @@ import {
   Trash2,
   CheckCircle,
   Clock,
-  Building
+  Building,
+  Phone,
+  PlusCircle
 } from 'lucide-react';
 
 const STATUS_OPTIONS = [
@@ -58,19 +60,17 @@ export const Employees = () => {
   // Create / Edit Modal
   const [modalOpen, setModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
+  const [isOtherDept, setIsOtherDept] = useState(false);
   const [formData, setFormData] = useState({
     employee_id: '',
     first_name: '',
-    last_name: '',
-    email: '',
     phone: '',
     department_id: '',
-    designation: '',
+    new_department_name: '',
+    designation: 'Staff',
     joining_date: new Date().toISOString().split('T')[0],
     employment_type: 'FULL_TIME',
     status: 'ACTIVE',
-    address: '',
-    emergency_contact: '',
   });
   const [formLoading, setFormLoading] = useState(false);
 
@@ -82,13 +82,14 @@ export const Employees = () => {
 
   const toast = useToast();
 
+  const fetchDepts = async () => {
+    try {
+      const res = await departmentApi.getDepartments(true);
+      if (res.success) setDepartments(res.data);
+    } catch (err) {}
+  };
+
   useEffect(() => {
-    const fetchDepts = async () => {
-      try {
-        const res = await departmentApi.getDepartments(true);
-        if (res.success) setDepartments(res.data);
-      } catch (err) {}
-    };
     fetchDepts();
   }, []);
 
@@ -126,54 +127,74 @@ export const Employees = () => {
 
   const handleOpenCreate = () => {
     setEditingEmployee(null);
+    setIsOtherDept(false);
     setFormData({
       employee_id: '',
       first_name: '',
-      last_name: '',
-      email: '',
       phone: '',
       department_id: departments[0]?.id || '',
-      designation: '',
+      new_department_name: '',
+      designation: 'Staff',
       joining_date: new Date().toISOString().split('T')[0],
       employment_type: 'FULL_TIME',
       status: 'ACTIVE',
-      address: '',
-      emergency_contact: '',
     });
     setModalOpen(true);
   };
 
   const handleOpenEdit = (emp) => {
     setEditingEmployee(emp);
+    setIsOtherDept(false);
     setFormData({
       employee_id: emp.employee_id,
-      first_name: emp.first_name,
-      last_name: emp.last_name,
-      email: emp.email,
+      first_name: emp.first_name || emp.full_name,
       phone: emp.phone || '',
-      department_id: emp.department_id,
-      designation: emp.designation,
-      joining_date: emp.joining_date,
-      employment_type: emp.employment_type,
-      status: emp.status,
-      address: emp.address || '',
-      emergency_contact: emp.emergency_contact || '',
+      department_id: emp.department_id || '',
+      new_department_name: '',
+      designation: emp.designation || 'Staff',
+      joining_date: emp.joining_date || new Date().toISOString().split('T')[0],
+      employment_type: emp.employment_type || 'FULL_TIME',
+      status: emp.status || 'ACTIVE',
     });
     setModalOpen(true);
+  };
+
+  const handleDeptSelectChange = (e) => {
+    const val = e.target.value;
+    if (val === '__OTHER__') {
+      setIsOtherDept(true);
+      setFormData({ ...formData, department_id: '', new_department_name: '' });
+    } else {
+      setIsOtherDept(false);
+      setFormData({ ...formData, department_id: Number(val), new_department_name: '' });
+    }
   };
 
   const handleSubmitEmployee = async (e) => {
     e.preventDefault();
     setFormLoading(true);
     try {
+      const payload = {
+        employee_id: formData.employee_id.trim() || undefined,
+        first_name: formData.first_name.trim(),
+        phone: formData.phone.trim() || undefined,
+        department_id: formData.department_id ? Number(formData.department_id) : undefined,
+        new_department_name: isOtherDept && formData.new_department_name.trim() ? formData.new_department_name.trim() : undefined,
+        designation: formData.designation.trim() || 'Staff',
+        joining_date: formData.joining_date || undefined,
+        employment_type: formData.employment_type,
+        status: formData.status,
+      };
+
       if (editingEmployee) {
-        await employeeApi.updateEmployee(editingEmployee.id, formData);
+        await employeeApi.updateEmployee(editingEmployee.id, payload);
         toast.success(`Employee ${formData.first_name} updated successfully`);
       } else {
-        await employeeApi.createEmployee(formData);
+        await employeeApi.createEmployee(payload);
         toast.success('New employee added successfully');
       }
       setModalOpen(false);
+      fetchDepts(); // Refresh departments in case a new one was added
       fetchEmployees();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to save employee details');
@@ -206,7 +227,7 @@ export const Employees = () => {
             Employee Directory
           </h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Manage organization staff, job designations, and employment statuses
+            Manage organization staff, job designations, and instant department assignments
           </p>
         </div>
 
@@ -226,7 +247,7 @@ export const Employees = () => {
           <form onSubmit={handleSearchSubmit} className="relative w-full sm:w-80">
             <input
               type="text"
-              placeholder="Search by name, ID, or email..."
+              placeholder="Search by name, employee code, or phone..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs rounded-xl pl-9 pr-4 py-2.5 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500"
@@ -286,11 +307,11 @@ export const Employees = () => {
           <div>
             <Table
               headers={[
-                'Employee',
-                'ID',
+                'Employee Name',
+                'Employee ID',
                 'Department',
                 'Designation',
-                'Joining Date',
+                'Contact Number',
                 'Status',
                 { label: 'Actions', align: 'right' },
               ]}
@@ -303,16 +324,15 @@ export const Employees = () => {
                   <td className="py-3.5 px-4 pl-6">
                     <div className="flex items-center gap-3">
                       <div className="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 flex items-center justify-center font-bold text-xs shrink-0">
-                        {emp.first_name.charAt(0)}
+                        {emp.first_name ? emp.first_name.charAt(0).toUpperCase() : 'E'}
                       </div>
                       <div>
                         <Link
                           to={`/employees/${emp.id}`}
                           className="font-semibold text-slate-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
                         >
-                          {emp.full_name}
+                          {emp.full_name || emp.first_name}
                         </Link>
-                        <div className="text-xs text-slate-400">{emp.email}</div>
                       </div>
                     </div>
                   </td>
@@ -321,16 +341,16 @@ export const Employees = () => {
                     {emp.employee_id}
                   </td>
 
-                  <td className="py-3.5 px-4 text-xs text-slate-600 dark:text-slate-400">
+                  <td className="py-3.5 px-4 text-xs text-slate-600 dark:text-slate-400 font-medium">
                     {emp.department?.name || 'Unassigned'}
                   </td>
 
                   <td className="py-3.5 px-4 text-xs text-slate-600 dark:text-slate-400">
-                    {emp.designation}
+                    {emp.designation || 'Staff'}
                   </td>
 
-                  <td className="py-3.5 px-4 text-xs text-slate-500 font-mono">
-                    {emp.joining_date}
+                  <td className="py-3.5 px-4 text-xs font-mono text-slate-500">
+                    {emp.phone || '-'}
                   </td>
 
                   <td className="py-3.5 px-4">
@@ -384,73 +404,76 @@ export const Employees = () => {
       <Modal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        maxWidth="max-w-2xl"
-        title={editingEmployee ? 'Edit Employee Details' : 'Add New Employee'}
+        maxWidth="max-w-xl"
+        title={editingEmployee ? 'Edit Employee' : 'Add Employee'}
         subtitle={
           editingEmployee
-            ? `Updating profile for ${editingEmployee.full_name} (${editingEmployee.employee_id})`
-            : 'Fill in employment and personal information'
+            ? `Updating profile for ${editingEmployee.full_name || editingEmployee.first_name} (${editingEmployee.employee_id})`
+            : 'Fill in the required information to register a staff member'
         }
       >
         <form onSubmit={handleSubmitEmployee} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
-              label="First Name"
-              required
-              value={formData.first_name}
-              onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-              placeholder="e.g. John"
-            />
-            <Input
-              label="Last Name"
-              required
-              value={formData.last_name}
-              onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-              placeholder="e.g. Doe"
-            />
+          {/* Employee Name */}
+          <Input
+            label="Employee Name"
+            required
+            value={formData.first_name}
+            onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+            placeholder="e.g. Rajesh Kumar"
+          />
+
+          {/* Contact (Optional) */}
+          <Input
+            label="Contact Number (Optional)"
+            type="tel"
+            value={formData.phone}
+            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+            placeholder="e.g. +91 98765 43210"
+            helperText="Optional mobile or phone number"
+          />
+
+          {/* Department Selection with Instant "Other" Creation */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+              Department
+            </label>
+            <select
+              value={isOtherDept ? '__OTHER__' : (formData.department_id || '')}
+              onChange={handleDeptSelectChange}
+              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-medium rounded-xl px-3 py-2.5 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- Select Department --</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+              <option value="__OTHER__" className="font-bold text-blue-600 dark:text-blue-400">
+                + Other (Create New Department...)
+              </option>
+            </select>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
-              label="Email Address"
-              type="email"
-              required
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              placeholder="john.doe@company.com"
-            />
-            <Input
-              label="Phone Number"
-              value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              placeholder="+1 (555) 000-0000"
-            />
-          </div>
+          {/* Instant Department Name Input if "Other" Selected */}
+          {isOtherDept && (
+            <div className="p-3.5 rounded-xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 animate-in fade-in duration-150">
+              <Input
+                label="New Department Name"
+                required
+                value={formData.new_department_name}
+                onChange={(e) => setFormData({ ...formData, new_department_name: e.target.value })}
+                placeholder="e.g. Quality Assurance"
+                helperText="This new department will be automatically created and assigned."
+              />
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Select
-              label="Department"
-              required
-              value={formData.department_id}
-              onChange={(e) => setFormData({ ...formData, department_id: Number(e.target.value) })}
-              options={departments.map((d) => ({ value: d.id, label: d.name }))}
-            />
             <Input
               label="Designation / Role"
-              required
               value={formData.designation}
               onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
-              placeholder="e.g. Senior Software Engineer"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Input
-              label="Joining Date"
-              type="date"
-              required
-              value={formData.joining_date}
-              onChange={(e) => setFormData({ ...formData, joining_date: e.target.value })}
+              placeholder="e.g. Software Engineer, Supervisor"
             />
             <Select
               label="Employment Type"
@@ -458,6 +481,9 @@ export const Employees = () => {
               onChange={(e) => setFormData({ ...formData, employment_type: e.target.value })}
               options={EMPLOYMENT_TYPES}
             />
+          </div>
+
+          <div>
             <Select
               label="Employment Status"
               value={formData.status}
@@ -466,27 +492,12 @@ export const Employees = () => {
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
-              label="Residential Address"
-              value={formData.address}
-              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-              placeholder="City, State / Full address"
-            />
-            <Input
-              label="Emergency Contact"
-              value={formData.emergency_contact}
-              onChange={(e) => setFormData({ ...formData, emergency_contact: e.target.value })}
-              placeholder="Name & contact info"
-            />
-          </div>
-
           {!editingEmployee && (
             <Input
               label="Custom Employee Code (Optional)"
               value={formData.employee_id}
               onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
-              placeholder="Leave empty to auto-generate (e.g. EMP-0001)"
+              placeholder="Leave blank to auto-generate (e.g. EMP-0001)"
               helperText="Auto-assigned sequentially if left blank"
             />
           )}

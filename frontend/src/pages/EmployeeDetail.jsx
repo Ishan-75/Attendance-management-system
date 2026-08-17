@@ -11,7 +11,6 @@ import { SkeletonLoader } from '../components/common/SkeletonLoader';
 import {
   ArrowLeft,
   Calendar,
-  Mail,
   Phone,
   Building,
   Briefcase,
@@ -21,9 +20,7 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
-  User,
-  MapPin,
-  HeartHandshake
+  User
 } from 'lucide-react';
 
 export const EmployeeDetail = () => {
@@ -124,13 +121,13 @@ export const EmployeeDetail = () => {
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div className="flex items-center gap-5">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center text-2xl font-bold shadow-lg shadow-blue-500/20 shrink-0">
-              {employee.first_name.charAt(0)}
+              {employee.first_name ? employee.first_name.charAt(0).toUpperCase() : 'E'}
             </div>
 
             <div>
               <div className="flex flex-wrap items-center gap-3">
                 <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
-                  {employee.full_name}
+                  {employee.full_name || employee.first_name}
                 </h2>
                 <Badge variant={employee.status} size="md" dot>
                   {employee.status}
@@ -144,7 +141,7 @@ export const EmployeeDetail = () => {
                 <span>•</span>
                 <span className="flex items-center gap-1">
                   <Briefcase className="w-3.5 h-3.5" />
-                  {employee.designation}
+                  {employee.designation || 'Staff'}
                 </span>
                 <span>•</span>
                 <span className="flex items-center gap-1">
@@ -156,37 +153,29 @@ export const EmployeeDetail = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 dark:text-slate-300">
-            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 px-3 py-2 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
-              <Mail className="w-3.5 h-3.5 text-slate-400" />
-              <span>{employee.email}</span>
-            </div>
-            {employee.phone && (
-              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 px-3 py-2 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
-                <Phone className="w-3.5 h-3.5 text-slate-400" />
-                <span>{employee.phone}</span>
+            {employee.phone ? (
+              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 px-3.5 py-2 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
+                <Phone className="w-3.5 h-3.5 text-blue-500" />
+                <span className="font-mono font-medium">{employee.phone}</span>
               </div>
+            ) : (
+              <span className="text-slate-400 text-xs italic">No contact number provided</span>
             )}
           </div>
         </div>
 
-        {/* Extended Details */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-6 mt-6 border-t border-slate-100 dark:border-slate-800 text-xs">
+        {/* Details Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-6 mt-6 border-t border-slate-100 dark:border-slate-800 text-xs">
           <div>
             <span className="text-slate-400 block mb-1">Employment Type</span>
             <span className="font-semibold text-slate-800 dark:text-slate-200">
-              {employee.employment_type.replace('_', ' ')}
+              {(employee.employment_type || 'FULL_TIME').replace('_', ' ')}
             </span>
           </div>
           <div>
             <span className="text-slate-400 block mb-1">Joining Date</span>
             <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono">
-              {employee.joining_date}
-            </span>
-          </div>
-          <div>
-            <span className="text-slate-400 block mb-1">Emergency Contact</span>
-            <span className="font-semibold text-slate-800 dark:text-slate-200">
-              {employee.emergency_contact || 'None Provided'}
+              {employee.joining_date || 'Not specified'}
             </span>
           </div>
         </div>

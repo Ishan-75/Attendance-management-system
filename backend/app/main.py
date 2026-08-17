@@ -18,13 +18,15 @@ logger = logging.getLogger("attendance.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Seed initial data
-    logger.info("Initializing database with initial seeds...")
+    # Startup: Ensure database tables exist & seed baseline data
+    logger.info("Verifying and initializing database on startup...")
     db = SessionLocal()
     try:
         init_db(db)
+        logger.info("Database tables and baseline seeds verified successfully.")
     except Exception as e:
-        logger.error(f"Error during startup database seed: {e}", exc_info=True)
+        logger.error(f"Critical error during startup database initialization: {e}", exc_info=True)
+        raise e
     finally:
         db.close()
     yield

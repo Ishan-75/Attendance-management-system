@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { attendanceApi } from '../api/attendanceApi';
 import { departmentApi } from '../api/departmentApi';
+import { reportApi } from '../api/reportApi';
 import { useToast } from '../context/ToastContext';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
@@ -19,7 +20,8 @@ import {
   RotateCcw,
   Edit3,
   Clock,
-  AlertCircle
+  AlertCircle,
+  FileSpreadsheet
 } from 'lucide-react';
 
 const STATUS_OPTIONS = [
@@ -40,6 +42,7 @@ export const Attendance = () => {
   const [sheetItems, setSheetItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // Correction Modal State
   const [correctionTarget, setCorrectionTarget] = useState(null);
@@ -196,6 +199,22 @@ export const Attendance = () => {
     }
   };
 
+  const handleExportDailySheet = async () => {
+    setExporting(true);
+    try {
+      await reportApi.downloadReport('excel', {
+        start_date: selectedDate,
+        end_date: selectedDate,
+        department_id: selectedDept || undefined,
+      });
+      toast.success(`Exported department attendance for ${selectedDate}`);
+    } catch (err) {
+      toast.error('Failed to export daily attendance sheet');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Page Title & Actions */}
@@ -209,7 +228,17 @@ export const Attendance = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <Button
+            variant="outline"
+            size="md"
+            loading={exporting}
+            onClick={handleExportDailySheet}
+            icon={FileSpreadsheet}
+            className="text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+          >
+            Export Sheet (.xlsx)
+          </Button>
           <Button
             variant="outline"
             size="md"

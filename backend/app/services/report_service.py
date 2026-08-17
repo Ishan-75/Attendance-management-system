@@ -8,7 +8,7 @@ from sqlalchemy import and_
 from app.models.attendance import Attendance, AttendanceStatus
 from app.models.employee import Employee
 from app.models.department import Department
-from app.schemas.report import AttendanceReportRow, ReportFilter
+from app.schemas.report import AttendanceReportRow, ReportFilter, EmployeeAttendanceSummaryRow
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -21,7 +21,7 @@ class ReportService:
         db: Session,
         filters: ReportFilter
     ) -> List[AttendanceReportRow]:
-        """Fetch filtered attendance records for reports."""
+        """Fetch filtered attendance records for reports ordered department-wise."""
         query = db.query(Attendance).join(Employee).outerjoin(Department, Employee.department_id == Department.id)
 
         query = query.filter(
@@ -39,25 +39,30 @@ class ReportService:
         if filters.status:
             query = query.filter(Attendance.status == filters.status)
 
-        records = query.order_by(Attendance.attendance_date.desc(), Employee.employee_id.asc()).all()
+        records = query.order_by(
+            Department.name.asc().nulls_last(),
+            Employee.employee_id.asc(),
+            Attendance.attendance_date.desc()
+        ).all()
 
         rows = []
         for r in records:
             emp = r.employee
-            dept_name = emp.department.name if emp and emp.department else "Unassigned"
+            dept_name = emp.department.name if emp and emp.department else "General / Unassigned"
             rows.append(
                 AttendanceReportRow(
                     employee_code=emp.employee_id if emp else "N/A",
                     employee_name=emp.full_name if emp else "N/A",
                     department_name=dept_name,
+                    designation=emp.designation if emp and emp.designation else "Staff",
                     attendance_date=r.attendance_date,
                     status=r.status,
                     check_in=r.check_in_time.strftime("%H:%M") if r.check_in_time else "-",
                     check_out=r.check_out_time.strftime("%H:%M") if r.check_out_time else "-",
-                    total_hours=r.total_hours,
-                    overtime_hours=r.overtime_hours,
-                    late_minutes=r.late_minutes,
-                    early_departure_minutes=r.early_departure_minutes,
+                    total_hours=r.total_hours or 0.0,
+                    overtime_hours=r.overtime_hours or 0.0,
+                    late_minutes=r.late_minutes or 0,
+                    early_departure_minutes=r.early_departure_minutes or 0,
                     remarks=r.remarks or ""
                 )
             )
@@ -68,7 +73,7 @@ class ReportService:
         db: Session,
         filters: ReportFilter
     ) -> io.StringIO:
-        """Generate formatted RFC 4180 CSV export of attendance report."""
+        """Generate formatted CSV export of attendance report organized by department."""
         rows = ReportService.get_attendance_report(db, filters)
 
         output = io.StringIO()
@@ -76,15 +81,16 @@ class ReportService:
 
         # Header
         writer.writerow([
+            "Department",
             "Employee ID",
             "Employee Name",
-            "Department",
+            "Designation",
             "Date",
             "Status",
-            "Check In",
-            "Check Out",
+            "Punch In",
+            "Punch Out",
             "Total Hours",
-            "Overtime Hours",
+            "Overtime (Hrs)",
             "Late (Mins)",
             "Early Departure (Mins)",
             "Remarks"
@@ -92,9 +98,10 @@ class ReportService:
 
         for row in rows:
             writer.writerow([
+                row.department_name,
                 row.employee_code,
                 row.employee_name,
-                row.department_name,
+                row.designation,
                 row.attendance_date.strftime("%Y-%m-%d"),
                 row.status,
                 row.check_in,
@@ -114,27 +121,57 @@ class ReportService:
         db: Session,
         filters: ReportFilter
     ) -> io.BytesIO:
-        """Generate professionally styled Excel (.xlsx) workbook with formulas and formatted cells."""
+        """
+        Generate a premium, Department-Wise grouped Excel (.xlsx) workbook.
+        Features:
+        - Department Section Grouping with colored headers
+        - Individual Employee Punch-In & Punch-Out records
+        - Department Subtotals (Records, Worked Hours, Overtime)
+        - Grand Organization Total Row
+        - Sheet 2: Department KPI Summary Dashboard
+        """
         rows = ReportService.get_attendance_report(db, filters)
 
         wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Attendance Statement"
-        ws.views.sheetView[0].showGridLines = True
+        
+        # -------------------------------------------------------------
+        # SHEET 1: Department-Wise Punch & Attendance Statement
+        # -------------------------------------------------------------
+        ws1 = wb.active
+        ws1.title = "Department Attendance"
+        ws1.views.sheetView[0].showGridLines = True
 
-        # Styles
-        title_font = Font(name="Calibri", size=16, bold=True, color="1E3A8A")
+        # Color & Font Definitions
+        title_font = Font(name="Calibri", size=15, bold=True, color="1E3A8A")
         sub_font = Font(name="Calibri", size=10, italic=True, color="64748B")
-        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-        header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
-        summary_font = Font(name="Calibri", size=11, bold=True, color="0F172A")
-        summary_fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
-
+        
+        dept_header_font = Font(name="Calibri", size=12, bold=True, color="FFFFFF")
+        dept_header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid") # Dark Slate
+        
+        col_header_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+        col_header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid") # Royal Blue
+        
+        subtotal_font = Font(name="Calibri", size=10, bold=True, color="0F172A")
+        subtotal_fill = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid") # Light Slate
+        
+        grand_total_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        grand_total_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid") # Midnight Navy
+        
+        data_font = Font(name="Calibri", size=10, color="1E293B")
+        mono_font = Font(name="Consolas", size=9, color="334155")
+        
         border_thin = Border(
             left=Side(style="thin", color="CBD5E1"),
             right=Side(style="thin", color="CBD5E1"),
             top=Side(style="thin", color="CBD5E1"),
             bottom=Side(style="thin", color="CBD5E1")
+        )
+        
+        border_double_bottom = Border(
+            left=Side(style="thin", color="CBD5E1"),
+            right=Side(style="thin", color="CBD5E1"),
+            top=Side(style="thin", color="CBD5E1"),
+            bottom=Side(style="double", color="0F172A")
         )
 
         status_fills = {
@@ -147,100 +184,284 @@ class ReportService:
             "WORK_FROM_HOME": PatternFill(start_color="CFFAFE", end_color="CFFAFE", fill_type="solid"),
         }
 
-        # Title Block
-        ws["A1"] = "WorkforceHub Attendance Report"
-        ws["A1"].font = title_font
-        ws["A2"] = f"Report Date Range: {filters.start_date.strftime('%Y-%m-%d')} to {filters.end_date.strftime('%Y-%m-%d')} | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        ws["A2"].font = sub_font
+        # 1. Title Banner
+        ws1["A1"] = "WorkforceHub — Department Attendance & Punch Statement"
+        ws1["A1"].font = title_font
+        ws1["A2"] = f"Period: {filters.start_date.strftime('%d-%b-%Y')} to {filters.end_date.strftime('%d-%b-%Y')} | Generated: {datetime.now().strftime('%d-%b-%Y %H:%M')} | Total Records: {len(rows)}"
+        ws1["A2"].font = sub_font
+        ws1.row_dimensions[1].height = 24
+        ws1.row_dimensions[2].height = 18
 
         headers = [
             "Employee ID",
             "Employee Name",
-            "Department",
+            "Designation",
             "Date",
             "Status",
-            "Check In",
-            "Check Out",
+            "Punch In",
+            "Punch Out",
             "Total Hours",
             "Overtime (Hrs)",
             "Late (Mins)",
-            "Early Departure",
-            "Remarks"
+            "Early Dep (Mins)",
+            "Remarks / Notes"
         ]
 
-        start_row = 4
-        for col_idx, header_text in enumerate(headers, 1):
-            cell = ws.cell(row=start_row, column=col_idx, value=header_text)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            cell.border = border_thin
-
-        ws.row_dimensions[start_row].height = 28
-
-        curr_row = start_row + 1
-        total_hours_sum = 0.0
-        total_ot_sum = 0.0
-
+        # Group rows by Department
+        dept_groups: Dict[str, List[AttendanceReportRow]] = {}
         for r in rows:
-            ws.cell(row=curr_row, column=1, value=r.employee_code).alignment = Alignment(horizontal="center")
-            ws.cell(row=curr_row, column=2, value=r.employee_name).alignment = Alignment(horizontal="left")
-            ws.cell(row=curr_row, column=3, value=r.department_name).alignment = Alignment(horizontal="left")
-            ws.cell(row=curr_row, column=4, value=r.attendance_date.strftime("%Y-%m-%d")).alignment = Alignment(horizontal="center")
+            dname = r.department_name or "General / Unassigned"
+            if dname not in dept_groups:
+                dept_groups[dname] = []
+            dept_groups[dname].append(r)
+
+        current_row = 4
+        grand_total_hours = 0.0
+        grand_total_ot = 0.0
+
+        if not dept_groups:
+            # Handle empty state
+            ws1.cell(row=current_row, column=1, value="No attendance records found for the selected period.").font = sub_font
+            current_row += 2
+        else:
+            for dept_name, dept_rows in dept_groups.items():
+                dept_hours_sum = sum(r.total_hours for r in dept_rows)
+                dept_ot_sum = sum(r.overtime_hours for r in dept_rows)
+                grand_total_hours += dept_hours_sum
+                grand_total_ot += dept_ot_sum
+
+                # --- Department Banner Header ---
+                ws1.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=len(headers))
+                dept_banner_cell = ws1.cell(row=current_row, column=1)
+                dept_banner_cell.value = f"  🏢 DEPARTMENT: {dept_name.upper()}  ({len(dept_rows)} Records)"
+                dept_banner_cell.font = dept_header_font
+                dept_banner_cell.fill = dept_header_fill
+                dept_banner_cell.alignment = Alignment(horizontal="left", vertical="center")
+                ws1.row_dimensions[current_row].height = 26
+
+                for col_idx in range(1, len(headers) + 1):
+                    ws1.cell(row=current_row, column=col_idx).border = border_thin
+                current_row += 1
+
+                # --- Column Headers for this department ---
+                ws1.row_dimensions[current_row].height = 22
+                for col_idx, h_text in enumerate(headers, 1):
+                    c = ws1.cell(row=current_row, column=col_idx, value=h_text)
+                    c.font = col_header_font
+                    c.fill = col_header_fill
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                    c.border = border_thin
+                current_row += 1
+
+                # --- Employee Records & Punches ---
+                for r in dept_rows:
+                    ws1.row_dimensions[current_row].height = 20
+                    
+                    c1 = ws1.cell(row=current_row, column=1, value=r.employee_code)
+                    c1.font = mono_font
+                    c1.alignment = Alignment(horizontal="center", vertical="center")
+
+                    c2 = ws1.cell(row=current_row, column=2, value=r.employee_name)
+                    c2.font = data_font
+                    c2.alignment = Alignment(horizontal="left", vertical="center")
+
+                    c3 = ws1.cell(row=current_row, column=3, value=r.designation)
+                    c3.font = data_font
+                    c3.alignment = Alignment(horizontal="left", vertical="center")
+
+                    c4 = ws1.cell(row=current_row, column=4, value=r.attendance_date.strftime("%Y-%m-%d"))
+                    c4.font = mono_font
+                    c4.alignment = Alignment(horizontal="center", vertical="center")
+
+                    c5 = ws1.cell(row=current_row, column=5, value=r.status)
+                    c5.font = Font(name="Calibri", size=9, bold=True)
+                    c5.alignment = Alignment(horizontal="center", vertical="center")
+                    if r.status in status_fills:
+                        c5.fill = status_fills[r.status]
+
+                    # Punch In / Check-In
+                    c6 = ws1.cell(row=current_row, column=6, value=r.check_in)
+                    c6.font = mono_font
+                    c6.alignment = Alignment(horizontal="center", vertical="center")
+
+                    # Punch Out / Check-Out
+                    c7 = ws1.cell(row=current_row, column=7, value=r.check_out)
+                    c7.font = mono_font
+                    c7.alignment = Alignment(horizontal="center", vertical="center")
+
+                    # Hours & Overtime
+                    c8 = ws1.cell(row=current_row, column=8, value=round(r.total_hours, 2))
+                    c8.font = data_font
+                    c8.alignment = Alignment(horizontal="right", vertical="center")
+                    c8.number_format = "0.00"
+
+                    c9 = ws1.cell(row=current_row, column=9, value=round(r.overtime_hours, 2))
+                    c9.font = data_font
+                    c9.alignment = Alignment(horizontal="right", vertical="center")
+                    c9.number_format = "0.00"
+
+                    c10 = ws1.cell(row=current_row, column=10, value=r.late_minutes if r.late_minutes > 0 else "-")
+                    c10.font = data_font
+                    c10.alignment = Alignment(horizontal="right", vertical="center")
+
+                    c11 = ws1.cell(row=current_row, column=11, value=r.early_departure_minutes if r.early_departure_minutes > 0 else "-")
+                    c11.font = data_font
+                    c11.alignment = Alignment(horizontal="right", vertical="center")
+
+                    c12 = ws1.cell(row=current_row, column=12, value=r.remarks)
+                    c12.font = sub_font
+                    c12.alignment = Alignment(horizontal="left", vertical="center")
+
+                    for col_idx in range(1, len(headers) + 1):
+                        ws1.cell(row=current_row, column=col_idx).border = border_thin
+                    
+                    current_row += 1
+
+                # --- Department Subtotal Row ---
+                ws1.row_dimensions[current_row].height = 22
+                ws1.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=7)
+                sub_label_cell = ws1.cell(row=current_row, column=1)
+                sub_label_cell.value = f"  Subtotal: {dept_name} ({len(dept_rows)} Records)"
+                sub_label_cell.font = subtotal_font
+                sub_label_cell.alignment = Alignment(horizontal="left", vertical="center")
+
+                c_sub_h = ws1.cell(row=current_row, column=8, value=round(dept_hours_sum, 2))
+                c_sub_h.font = subtotal_font
+                c_sub_h.alignment = Alignment(horizontal="right", vertical="center")
+                c_sub_h.number_format = "0.00"
+
+                c_sub_ot = ws1.cell(row=current_row, column=9, value=round(dept_ot_sum, 2))
+                c_sub_ot.font = subtotal_font
+                c_sub_ot.alignment = Alignment(horizontal="right", vertical="center")
+                c_sub_ot.number_format = "0.00"
+
+                for col_idx in range(1, len(headers) + 1):
+                    cell = ws1.cell(row=current_row, column=col_idx)
+                    cell.fill = subtotal_fill
+                    cell.border = border_thin
+
+                current_row += 2  # Leave an aesthetic gap between departments
+
+            # --- Grand Total Footer Row ---
+            ws1.row_dimensions[current_row].height = 26
+            ws1.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=7)
+            grand_label_cell = ws1.cell(row=current_row, column=1)
+            grand_label_cell.value = f"  ★ GRAND TOTAL: ALL DEPARTMENTS ({len(rows)} Total Records)"
+            grand_label_cell.font = grand_total_font
+            grand_label_cell.alignment = Alignment(horizontal="left", vertical="center")
+
+            c_gt_h = ws1.cell(row=current_row, column=8, value=round(grand_total_hours, 2))
+            c_gt_h.font = grand_total_font
+            c_gt_h.alignment = Alignment(horizontal="right", vertical="center")
+            c_gt_h.number_format = "0.00"
+
+            c_gt_ot = ws1.cell(row=current_row, column=9, value=round(grand_total_ot, 2))
+            c_gt_ot.font = grand_total_font
+            c_gt_ot.alignment = Alignment(horizontal="right", vertical="center")
+            c_gt_ot.number_format = "0.00"
+
+            for col_idx in range(1, len(headers) + 1):
+                cell = ws1.cell(row=current_row, column=col_idx)
+                cell.fill = grand_total_fill
+                cell.border = border_double_bottom
+
+        # Column widths for Sheet 1
+        col_widths = {
+            "A": 16, # ID
+            "B": 26, # Name
+            "C": 22, # Designation
+            "D": 14, # Date
+            "E": 16, # Status
+            "F": 14, # Punch In
+            "G": 14, # Punch Out
+            "H": 15, # Total Hours
+            "I": 15, # Overtime
+            "J": 13, # Late
+            "K": 15, # Early Dep
+            "L": 28  # Remarks
+        }
+        for col_letter, width in col_widths.items():
+            ws1.column_dimensions[col_letter].width = width
+
+        # -------------------------------------------------------------
+        # SHEET 2: Department KPI Summary Dashboard
+        # -------------------------------------------------------------
+        ws2 = wb.create_sheet(title="Department KPI Summary")
+        ws2.views.sheetView[0].showGridLines = True
+
+        ws2["A1"] = "Department Attendance KPI Summary"
+        ws2["A1"].font = title_font
+        ws2["A2"] = f"Summary Period: {filters.start_date.strftime('%d-%b-%Y')} to {filters.end_date.strftime('%d-%b-%Y')}"
+        ws2["A2"].font = sub_font
+
+        kpi_headers = [
+            "Department Name",
+            "Total Records",
+            "Present",
+            "Absent",
+            "Leave",
+            "Half Day",
+            "WFH / Other",
+            "Attendance Rate (%)",
+            "Total Worked Hours",
+            "Overtime Hours"
+        ]
+
+        ws2.row_dimensions[4].height = 24
+        for col_idx, h_text in enumerate(kpi_headers, 1):
+            c = ws2.cell(row=4, column=col_idx, value=h_text)
+            c.font = col_header_font
+            c.fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.border = border_thin
+
+        kpi_row = 5
+        for dept_name, dept_rows in dept_groups.items():
+            ws2.row_dimensions[kpi_row].height = 20
             
-            status_cell = ws.cell(row=curr_row, column=5, value=r.status)
-            status_cell.alignment = Alignment(horizontal="center")
-            if r.status in status_fills:
-                status_cell.fill = status_fills[r.status]
-
-            ws.cell(row=curr_row, column=6, value=r.check_in).alignment = Alignment(horizontal="center")
-            ws.cell(row=curr_row, column=7, value=r.check_out).alignment = Alignment(horizontal="center")
+            p_cnt = sum(1 for r in dept_rows if r.status == AttendanceStatus.PRESENT)
+            a_cnt = sum(1 for r in dept_rows if r.status == AttendanceStatus.ABSENT)
+            l_cnt = sum(1 for r in dept_rows if r.status == AttendanceStatus.LEAVE)
+            hd_cnt = sum(1 for r in dept_rows if r.status == AttendanceStatus.HALF_DAY)
+            wfh_cnt = sum(1 for r in dept_rows if r.status in [AttendanceStatus.WORK_FROM_HOME, AttendanceStatus.HOLIDAY, AttendanceStatus.WEEK_OFF])
             
-            h_cell = ws.cell(row=curr_row, column=8, value=round(r.total_hours, 2))
-            h_cell.alignment = Alignment(horizontal="right")
-            h_cell.number_format = "0.00"
-            total_hours_sum += r.total_hours
+            total_recs = len(dept_rows)
+            att_rate = round(((p_cnt + hd_cnt * 0.5 + sum(1 for r in dept_rows if r.status == AttendanceStatus.WORK_FROM_HOME)) / total_recs) * 100, 1) if total_recs > 0 else 0.0
+            
+            d_hours = sum(r.total_hours for r in dept_rows)
+            d_ot = sum(r.overtime_hours for r in dept_rows)
 
-            ot_cell = ws.cell(row=curr_row, column=9, value=round(r.overtime_hours, 2))
-            ot_cell.alignment = Alignment(horizontal="right")
-            ot_cell.number_format = "0.00"
-            total_ot_sum += r.overtime_hours
+            ws2.cell(row=kpi_row, column=1, value=dept_name).font = Font(name="Calibri", size=10, bold=True)
+            ws2.cell(row=kpi_row, column=2, value=total_recs).alignment = Alignment(horizontal="center")
+            ws2.cell(row=kpi_row, column=3, value=p_cnt).alignment = Alignment(horizontal="center")
+            ws2.cell(row=kpi_row, column=4, value=a_cnt).alignment = Alignment(horizontal="center")
+            ws2.cell(row=kpi_row, column=5, value=l_cnt).alignment = Alignment(horizontal="center")
+            ws2.cell(row=kpi_row, column=6, value=hd_cnt).alignment = Alignment(horizontal="center")
+            ws2.cell(row=kpi_row, column=7, value=wfh_cnt).alignment = Alignment(horizontal="center")
+            
+            rate_cell = ws2.cell(row=kpi_row, column=8, value=f"{att_rate:.1f}%")
+            rate_cell.alignment = Alignment(horizontal="right")
+            rate_cell.font = Font(name="Calibri", size=10, bold=True, color="166534" if att_rate >= 80 else "991B1B")
 
-            ws.cell(row=curr_row, column=10, value=r.late_minutes).alignment = Alignment(horizontal="right")
-            ws.cell(row=curr_row, column=11, value=r.early_departure_minutes).alignment = Alignment(horizontal="right")
-            ws.cell(row=curr_row, column=12, value=r.remarks).alignment = Alignment(horizontal="left")
+            h_c = ws2.cell(row=kpi_row, column=9, value=round(d_hours, 2))
+            h_c.alignment = Alignment(horizontal="right")
+            h_c.number_format = "0.00"
 
-            for col_idx in range(1, 13):
-                ws.cell(row=curr_row, column=col_idx).border = border_thin
+            ot_c = ws2.cell(row=kpi_row, column=10, value=round(d_ot, 2))
+            ot_c.alignment = Alignment(horizontal="right")
+            ot_c.number_format = "0.00"
 
-            ws.row_dimensions[curr_row].height = 20
-            curr_row += 1
+            for col_idx in range(1, len(kpi_headers) + 1):
+                ws2.cell(row=kpi_row, column=col_idx).border = border_thin
 
-        # Summary footer row
-        summary_row = curr_row
-        ws.cell(row=summary_row, column=1, value="TOTAL SUMMARY").font = summary_font
-        ws.cell(row=summary_row, column=2, value=f"{len(rows)} Records").font = summary_font
-        ws.cell(row=summary_row, column=8, value=round(total_hours_sum, 2)).font = summary_font
-        ws.cell(row=summary_row, column=8).number_format = "0.00"
-        ws.cell(row=summary_row, column=9, value=round(total_ot_sum, 2)).font = summary_font
-        ws.cell(row=summary_row, column=9).number_format = "0.00"
+            kpi_row += 1
 
-        for col_idx in range(1, 13):
-            cell = ws.cell(row=summary_row, column=col_idx)
-            cell.fill = summary_fill
-            cell.border = border_thin
-
-        ws.row_dimensions[summary_row].height = 24
-
-        # Auto-adjust column widths
-        for col in ws.columns:
-            max_len = max(len(str(cell.value or "")) for cell in col)
-            col_letter = get_column_letter(col[0].column)
-            ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
-
-        ws.column_dimensions["B"].width = 24
-        ws.column_dimensions["C"].width = 20
-        ws.column_dimensions["L"].width = 28
+        kpi_widths = {
+            "A": 26, "B": 14, "C": 12, "D": 12, "E": 12,
+            "F": 12, "G": 14, "H": 20, "I": 18, "J": 16
+        }
+        for col_letter, width in kpi_widths.items():
+            ws2.column_dimensions[col_letter].width = width
 
         output = io.BytesIO()
         wb.save(output)
@@ -252,177 +473,159 @@ class ReportService:
         db: Session,
         filters: ReportFilter
     ) -> str:
-        """Generate structured JSON report payload with summary metrics."""
+        """Generate structured JSON attendance export grouped by department."""
         rows = ReportService.get_attendance_report(db, filters)
         
-        status_counts = {}
-        total_hours = 0.0
-        total_overtime = 0.0
-        
-        serialized_rows = []
+        dept_map: Dict[str, List[Dict[str, Any]]] = {}
+        records_list: List[Dict[str, Any]] = []
         for r in rows:
-            status_counts[r.status] = status_counts.get(r.status, 0) + 1
-            total_hours += r.total_hours
-            total_overtime += r.overtime_hours
-            serialized_rows.append({
+            dname = r.department_name or "General / Unassigned"
+            if dname not in dept_map:
+                dept_map[dname] = []
+            row_dict = {
                 "employee_code": r.employee_code,
                 "employee_name": r.employee_name,
-                "department": r.department_name,
-                "date": r.attendance_date.strftime("%Y-%m-%d"),
+                "department_name": r.department_name,
+                "designation": r.designation,
+                "attendance_date": r.attendance_date.strftime("%Y-%m-%d"),
                 "status": r.status,
-                "check_in": r.check_in,
-                "check_out": r.check_out,
-                "total_hours": round(r.total_hours, 2),
-                "overtime_hours": round(r.overtime_hours, 2),
+                "punch_in": r.check_in,
+                "punch_out": r.check_out,
+                "total_hours": r.total_hours,
+                "overtime_hours": r.overtime_hours,
                 "late_minutes": r.late_minutes,
                 "early_departure_minutes": r.early_departure_minutes,
                 "remarks": r.remarks
-            })
+            }
+            dept_map[dname].append(row_dict)
+            records_list.append(row_dict)
 
-        payload = {
+        data = {
             "metadata": {
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "filter_start_date": filters.start_date.strftime("%Y-%m-%d"),
-                "filter_end_date": filters.end_date.strftime("%Y-%m-%d"),
+                "title": "WorkforceHub Attendance Statement",
+                "start_date": str(filters.start_date),
+                "end_date": str(filters.end_date),
                 "total_records": len(rows),
-                "summary": {
-                    "total_hours_worked": round(total_hours, 2),
-                    "total_overtime_hours": round(total_overtime, 2),
-                    "status_breakdown": status_counts
-                }
+                "department_count": len(dept_map)
             },
-            "records": serialized_rows
+            "records": records_list,
+            "departments": dept_map
         }
-        return json.dumps(payload, indent=2)
+        return json.dumps(data, indent=2)
 
     @staticmethod
     def export_attendance_html(
         db: Session,
         filters: ReportFilter
     ) -> str:
-        """Generate print-ready HTML/PDF printable attendance report."""
+        """Generate printable styled HTML attendance statement organized department-wise."""
         rows = ReportService.get_attendance_report(db, filters)
-        total_hours = sum(r.total_hours for r in rows)
-        total_ot = sum(r.overtime_hours for r in rows)
 
-        rows_html = ""
+        dept_groups: Dict[str, List[AttendanceReportRow]] = {}
         for r in rows:
-            status_class = {
-                "PRESENT": "badge-present",
-                "ABSENT": "badge-absent",
-                "LEAVE": "badge-leave",
-                "HALF_DAY": "badge-half",
-                "WEEK_OFF": "badge-off",
-                "HOLIDAY": "badge-holiday",
-                "WORK_FROM_HOME": "badge-wfh"
-            }.get(r.status, "badge-default")
+            dname = r.department_name or "General / Unassigned"
+            if dname not in dept_groups:
+                dept_groups[dname] = []
+            dept_groups[dname].append(r)
 
-            rows_html += f"""
-            <tr>
-                <td style="font-family: monospace; font-weight: bold; color: #2563eb;">{r.employee_code}</td>
-                <td><strong>{r.employee_name}</strong></td>
-                <td>{r.department_name}</td>
-                <td style="font-family: monospace;">{r.attendance_date}</td>
-                <td><span class="badge {status_class}">{r.status}</span></td>
-                <td style="font-family: monospace;">{r.check_in}</td>
-                <td style="font-family: monospace;">{r.check_out}</td>
-                <td style="font-weight: bold; text-align: right;">{r.total_hours:.2f}h</td>
-                <td style="color: #4f46e5; font-weight: bold; text-align: right;">{f'+{r.overtime_hours:.2f}h' if r.overtime_hours > 0 else '-'}</td>
-                <td style="text-align: right;">{f'{r.late_minutes}m' if r.late_minutes > 0 else '-'}</td>
-                <td>{r.remarks or '-'}</td>
-            </tr>
+        dept_sections_html = ""
+        for dept_name, dept_rows in dept_groups.items():
+            dept_hours = sum(r.total_hours for r in dept_rows)
+            dept_ot = sum(r.overtime_hours for r in dept_rows)
+
+            table_rows_html = ""
+            for r in dept_rows:
+                badge_class = {
+                    "PRESENT": "status-present",
+                    "ABSENT": "status-absent",
+                    "LEAVE": "status-leave",
+                    "HALF_DAY": "status-half",
+                    "WORK_FROM_HOME": "status-wfh",
+                }.get(r.status, "status-other")
+
+                table_rows_html += f"""
+                <tr>
+                    <td class="mono">{r.employee_code}</td>
+                    <td><strong>{r.employee_name}</strong></td>
+                    <td>{r.designation}</td>
+                    <td class="mono">{r.attendance_date.strftime('%Y-%m-%d')}</td>
+                    <td><span class="badge {badge_class}">{r.status}</span></td>
+                    <td class="mono">{r.check_in}</td>
+                    <td class="mono">{r.check_out}</td>
+                    <td class="num">{r.total_hours:.2f}</td>
+                    <td class="num">{r.overtime_hours:.2f}</td>
+                    <td>{r.remarks}</td>
+                </tr>
+                """
+
+            dept_sections_html += f"""
+            <div class="dept-section">
+                <div class="dept-header">
+                    <h3>🏢 Department: {dept_name}</h3>
+                    <span>{len(dept_rows)} Records | Worked: {dept_hours:.2f}h | OT: {dept_ot:.2f}h</span>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Employee ID</th>
+                            <th>Employee Name</th>
+                            <th>Designation</th>
+                            <th>Date</th>
+                            <th>Status</th>
+                            <th>Punch In</th>
+                            <th>Punch Out</th>
+                            <th>Total Hrs</th>
+                            <th>Overtime</th>
+                            <th>Remarks</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {table_rows_html}
+                    </tbody>
+                </table>
+            </div>
             """
 
-        return f"""<!DOCTYPE html>
-<html lang="en">
+        html = f"""<!DOCTYPE html>
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Attendance Statement ({filters.start_date} to {filters.end_date})</title>
+    <meta charset="utf-8" />
+    <title>WorkforceHub Attendance Report</title>
     <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #0f172a; margin: 0; padding: 24px; font-size: 12px; }}
-        .header {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 20px; }}
-        .title {{ font-size: 20px; font-weight: bold; color: #1e3a8a; }}
-        .subtitle {{ font-size: 12px; color: #64748b; margin-top: 4px; }}
-        .metrics {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }}
-        .metric-card {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }}
-        .metric-label {{ font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: 600; }}
-        .metric-val {{ font-size: 18px; font-weight: bold; color: #0f172a; margin-top: 2px; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-        th {{ background: #f1f5f9; color: #475569; font-size: 11px; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid #cbd5e1; text-align: left; }}
-        td {{ padding: 8px 10px; border-bottom: 1px solid #f1f5f9; }}
-        .badge {{ display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; }}
-        .badge-present {{ background: #dcfce7; color: #15803d; }}
-        .badge-absent {{ background: #ffe4e6; color: #be123c; }}
-        .badge-leave {{ background: #fef3c7; color: #b45309; }}
-        .badge-half {{ background: #ffedd5; color: #c2410c; }}
-        .badge-holiday {{ background: #f3e8ff; color: #7e22ce; }}
-        .badge-wfh {{ background: #cffafe; color: #0e7490; }}
-        .badge-off {{ background: #f1f5f9; color: #475569; }}
-        .badge-default {{ background: #f1f5f9; color: #475569; }}
-        .footer {{ margin-top: 24px; font-size: 10px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 12px; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 24px; color: #1e293b; }}
+        .header {{ border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 24px; }}
+        .header h1 {{ margin: 0; color: #1e3a8a; font-size: 24px; }}
+        .header p {{ margin: 4px 0 0; color: #64748b; font-size: 13px; }}
+        .dept-section {{ margin-bottom: 28px; page-break-inside: avoid; }}
+        .dept-header {{ background: #1e293b; color: white; padding: 8px 14px; border-radius: 6px 6px 0 0; display: flex; justify-content: space-between; align-items: center; }}
+        .dept-header h3 {{ margin: 0; font-size: 14px; }}
+        .dept-header span {{ font-size: 12px; opacity: 0.9; }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 0; }}
+        th {{ background: #2563eb; color: white; padding: 8px 10px; text-align: left; font-weight: 600; }}
+        td {{ padding: 6px 10px; border-bottom: 1px solid #e2e8f0; }}
+        tr:hover {{ background: #f8fafc; }}
+        .mono {{ font-family: monospace; }}
+        .num {{ text-align: right; }}
+        .badge {{ padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; text-transform: uppercase; }}
+        .status-present {{ background: #dcfce7; color: #15803d; }}
+        .status-absent {{ background: #fee2e2; color: #b91c1c; }}
+        .status-leave {{ background: #fef3c7; color: #b45309; }}
+        .status-half {{ background: #ffedd5; color: #c2410c; }}
+        .status-wfh {{ background: #cffafe; color: #0e7490; }}
+        .status-other {{ background: #f1f5f9; color: #475569; }}
         @media print {{
-            body {{ padding: 0; }}
+            body {{ margin: 0; }}
             .no-print {{ display: none; }}
         }}
     </style>
 </head>
 <body>
-    <div class="no-print" style="margin-bottom: 16px; text-align: right;">
-        <button onclick="window.print()" style="background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold;">Print / Save as PDF</button>
-    </div>
     <div class="header">
-        <div>
-            <div class="title">🏢 WorkforceHub — Official Attendance Report</div>
-            <div class="subtitle">Reporting Period: <strong>{filters.start_date}</strong> to <strong>{filters.end_date}</strong></div>
-        </div>
-        <div style="text-align: right;">
-            <div style="font-size: 11px; color: #64748b;">Generated on</div>
-            <div style="font-weight: bold; font-family: monospace;">{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
-        </div>
+        <h1>WorkforceHub Attendance Statement</h1>
+        <p>Period: {filters.start_date} to {filters.end_date} | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
     </div>
-
-    <div class="metrics">
-        <div class="metric-card">
-            <div class="metric-label">Total Records</div>
-            <div class="metric-val">{len(rows)}</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">Total Hours Logged</div>
-            <div class="metric-val">{total_hours:.1f} hrs</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">Total Overtime</div>
-            <div class="metric-val" style="color: #4f46e5;">{total_ot:.1f} hrs</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">Compliance Status</div>
-            <div class="metric-val" style="color: #15803d;">Verified</div>
-        </div>
-    </div>
-
-    <table>
-        <thead>
-            <tr>
-                <th>Emp Code</th>
-                <th>Employee Name</th>
-                <th>Department</th>
-                <th>Date</th>
-                <th>Status</th>
-                <th>In</th>
-                <th>Out</th>
-                <th style="text-align: right;">Hours</th>
-                <th style="text-align: right;">Overtime</th>
-                <th style="text-align: right;">Late</th>
-                <th>Remarks</th>
-            </tr>
-        </thead>
-        <tbody>
-            {rows_html}
-        </tbody>
-    </table>
-
-    <div class="footer">
-        Confidential Document — Generated by WorkforceHub Attendance Suite. All rights reserved.
-    </div>
+    {dept_sections_html if dept_sections_html else '<p>No attendance records found for the selected period.</p>'}
 </body>
-</html>"""
+</html>
+"""
+        return html

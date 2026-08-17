@@ -4,21 +4,39 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
 from app.core.config import settings
 
-# Ensure data directory exists for SQLite
-if settings.DATABASE_URL.startswith("sqlite"):
-    db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-    db_dir = os.path.dirname(db_path)
-    if db_dir and not os.path.exists(db_dir):
-        os.makedirs(db_dir, exist_ok=True)
 
-# Create engine based on database type
-is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+def get_resolved_database_url() -> str:
+    """
+    Resolve DATABASE_URL cleanly.
+    If using SQLite with a relative path (e.g. sqlite:///./data/attendance.db),
+    resolve it stably relative to the backend root directory so that working directory
+    differences between local development and Render production never create disconnected DB files.
+    """
+    url = settings.DATABASE_URL
+    if url.startswith("sqlite:///./") or url.startswith("sqlite:///.\\"):
+        rel_path = url.split("sqlite:///", 1)[1]  # e.g. './data/attendance.db'
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        abs_db_path = os.path.abspath(os.path.join(backend_dir, rel_path))
+        os.makedirs(os.path.dirname(abs_db_path), exist_ok=True)
+        norm_path = abs_db_path.replace("\\", "/")
+        return f"sqlite:///{norm_path}"
+    elif url.startswith("sqlite:///"):
+        db_path = url.replace("sqlite:///", "")
+        db_dir = os.path.dirname(db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+        return url
+    return url
+
+
+RESOLVED_DATABASE_URL = get_resolved_database_url()
+is_sqlite = RESOLVED_DATABASE_URL.startswith("sqlite")
 
 connect_args = {}
 if is_sqlite:
     connect_args = {"check_same_thread": False}
     engine = create_engine(
-        settings.DATABASE_URL,
+        RESOLVED_DATABASE_URL,
         connect_args=connect_args,
         echo=False
     )
@@ -34,7 +52,7 @@ if is_sqlite:
 else:
     # MySQL / PostgreSQL configuration
     engine = create_engine(
-        settings.DATABASE_URL,
+        RESOLVED_DATABASE_URL,
         pool_size=10,
         max_overflow=20,
         pool_recycle=3600,

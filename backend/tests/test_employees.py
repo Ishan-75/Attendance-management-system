@@ -59,7 +59,7 @@ def test_duplicate_employee_email_prevention(client, manager_headers, db_session
     assert res2.status_code == 409
 
 
-def test_employee_status_update_and_soft_delete(client, manager_headers, db_session):
+def test_employee_status_update_and_soft_delete(client, manager_headers, admin_headers, db_session):
     dept = _get_or_create_dept(db_session)
     payload = {
         "first_name": "Charlie",
@@ -80,8 +80,12 @@ def test_employee_status_update_and_soft_delete(client, manager_headers, db_sess
     assert patch_res.status_code == 200
     assert patch_res.json()["data"]["status"] == "ON_NOTICE"
 
-    # Soft delete
-    del_res = client.delete(f"/api/v1/employees/{emp_id}", headers=manager_headers)
+    # Manager cannot delete employee (403 Forbidden)
+    mgr_del_res = client.delete(f"/api/v1/employees/{emp_id}", headers=manager_headers)
+    assert mgr_del_res.status_code == 403
+
+    # Admin can delete employee (200 OK)
+    del_res = client.delete(f"/api/v1/employees/{emp_id}", headers=admin_headers)
     assert del_res.status_code == 200
 
     # Getting deleted employee returns 404

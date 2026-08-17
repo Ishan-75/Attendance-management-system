@@ -15,6 +15,7 @@ class AttendanceReportRow(BaseModel):
     employee_code: str
     employee_name: str
     department_name: str
+    designation: Optional[str] = "Staff"
     attendance_date: date
     status: str
     check_in: str

@@ -14,6 +14,9 @@ from app.schemas.backup import BackupMetadata
 from app.services.audit_service import AuditService
 
 
+from app.db.session import RESOLVED_DATABASE_URL
+
+
 class BaseBackupService(ABC):
     @abstractmethod
     def create_backup(self, db: Session, user: User, ip_address: Optional[str] = None) -> BackupMetadata:
@@ -36,11 +39,8 @@ class SQLiteBackupService(BaseBackupService):
     def __init__(self):
         self.backup_dir = settings.BACKUP_DIR
         os.makedirs(self.backup_dir, exist_ok=True)
-        # Extract local sqlite db path
-        self.db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-        if self.db_path.startswith("./"):
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            self.db_path = os.path.normpath(os.path.join(base_dir, self.db_path[2:]))
+        # Extract resolved local sqlite db path
+        self.db_path = RESOLVED_DATABASE_URL.replace("sqlite:///", "")
 
     def _format_size(self, size_bytes: int) -> str:
         if size_bytes < 1024:

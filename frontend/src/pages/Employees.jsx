@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { employeeApi } from '../api/employeeApi';
 import { departmentApi } from '../api/departmentApi';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
@@ -26,7 +27,8 @@ import {
   Clock,
   Building,
   Phone,
-  PlusCircle
+  PlusCircle,
+  ShieldAlert
 } from 'lucide-react';
 
 const STATUS_OPTIONS = [
@@ -45,6 +47,7 @@ const EMPLOYMENT_TYPES = [
 ];
 
 export const Employees = () => {
+  const { isAdmin } = useAuth();
   const [employees, setEmployees] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -68,7 +71,6 @@ export const Employees = () => {
     department_id: '',
     new_department_name: '',
     designation: 'Staff',
-    joining_date: new Date().toISOString().split('T')[0],
     employment_type: 'FULL_TIME',
     status: 'ACTIVE',
   });
@@ -79,6 +81,10 @@ export const Employees = () => {
   const [newStatus, setNewStatus] = useState('');
   const [statusReason, setStatusReason] = useState('');
   const [statusLoading, setStatusLoading] = useState(false);
+
+  // Admin Delete Dialog
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const toast = useToast();
 
@@ -215,6 +221,21 @@ export const Employees = () => {
       toast.error(err.response?.data?.message || 'Failed to update status');
     } finally {
       setStatusLoading(false);
+    }
+  };
+
+  const handleDeleteEmployee = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      await employeeApi.deleteEmployee(deleteTarget.id);
+      toast.success(`Employee ${deleteTarget.full_name || deleteTarget.first_name} deleted successfully`);
+      setDeleteTarget(null);
+      fetchEmployees();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to delete employee');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -383,6 +404,17 @@ export const Employees = () => {
                       >
                         Edit
                       </Button>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          icon={Trash2}
+                          className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                          onClick={() => setDeleteTarget(emp)}
+                        >
+                          Delete
+                        </Button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -567,6 +599,18 @@ export const Employees = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Delete Employee Confirmation Dialog (Admin Only) */}
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        title="Delete Employee"
+        message={`Are you sure you want to delete ${deleteTarget?.full_name || deleteTarget?.first_name} (${deleteTarget?.employee_id})? This will remove their record from active directory while preserving audit and attendance history.`}
+        confirmLabel="Delete Employee"
+        confirmVariant="danger"
+        loading={deleteLoading}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteEmployee}
+      />
     </div>
   );
 };

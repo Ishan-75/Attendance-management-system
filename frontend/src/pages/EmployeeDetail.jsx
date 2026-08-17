@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { employeeApi } from '../api/employeeApi';
 import { attendanceApi } from '../api/attendanceApi';
 import { leaveApi } from '../api/leaveApi';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { SkeletonLoader } from '../components/common/SkeletonLoader';
+import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import {
   ArrowLeft,
   Calendar,
@@ -20,15 +22,22 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
-  User
+  User,
+  Trash2
 } from 'lucide-react';
 
 export const EmployeeDetail = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [employee, setEmployee] = useState(null);
   const [calendarData, setCalendarData] = useState(null);
   const [leaves, setLeaves] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Delete State
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const currentDate = new Date();
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
@@ -77,6 +86,20 @@ export const EmployeeDetail = () => {
     }
   };
 
+  const handleDeleteEmployee = async () => {
+    if (!employee) return;
+    setDeleteLoading(true);
+    try {
+      await employeeApi.deleteEmployee(employee.id);
+      toast.success(`Employee ${employee.full_name || employee.first_name} deleted successfully`);
+      navigate('/employees');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to delete employee');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   if (loading && !employee) {
     return (
       <div className="space-y-6">
@@ -105,7 +128,7 @@ export const EmployeeDetail = () => {
 
   return (
     <div className="space-y-8">
-      {/* Back Link */}
+      {/* Back Link & Admin Actions */}
       <div className="flex items-center justify-between">
         <Link
           to="/employees"
@@ -114,6 +137,18 @@ export const EmployeeDetail = () => {
           <ArrowLeft className="w-4 h-4" />
           Back to Employee Directory
         </Link>
+
+        {isAdmin && (
+          <Button
+            variant="outline"
+            size="sm"
+            icon={Trash2}
+            className="text-rose-600 border-rose-200 hover:bg-rose-50 dark:border-rose-900 dark:hover:bg-rose-950/40"
+            onClick={() => setDeleteOpen(true)}
+          >
+            Delete Employee
+          </Button>
+        )}
       </div>
 
       {/* Profile Header Banner */}
@@ -356,6 +391,18 @@ export const EmployeeDetail = () => {
           </div>
         )}
       </Card>
+
+      {/* Delete Employee Confirmation Dialog (Admin Only) */}
+      <ConfirmDialog
+        isOpen={deleteOpen}
+        title="Delete Employee"
+        message={`Are you sure you want to delete ${employee?.full_name || employee?.first_name} (${employee?.employee_id})? This action will remove the employee from directory while retaining attendance audit records.`}
+        confirmLabel="Delete Employee"
+        confirmVariant="danger"
+        loading={deleteLoading}
+        onCancel={() => setDeleteOpen(false)}
+        onConfirm={handleDeleteEmployee}
+      />
     </div>
   );
 };

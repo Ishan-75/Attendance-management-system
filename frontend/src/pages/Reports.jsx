@@ -282,29 +282,32 @@ export const Reports = () => {
 
             <Table
               headers={[
-                'Employee Code',
-                'Employee Name',
                 'Department',
+                'Employee ID',
+                'Employee Name',
+                'Designation',
                 'Date',
                 'Status',
-                'Check In',
-                'Check Out',
+                'Punch In',
+                'Punch Out',
                 'Total Hours',
                 'Overtime',
-                'Late (Mins)',
                 'Remarks'
               ]}
             >
               {reportRows.map((row, idx) => (
                 <tr key={idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                  <td className="py-3.5 px-4 pl-6 font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
+                  <td className="py-3.5 px-4 pl-6 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    {row.department_name}
+                  </td>
+                  <td className="py-3.5 px-4 font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
                     {row.employee_code}
                   </td>
                   <td className="py-3.5 px-4 font-semibold text-slate-900 dark:text-white">
                     {row.employee_name}
                   </td>
                   <td className="py-3.5 px-4 text-xs text-slate-500 dark:text-slate-400">
-                    {row.department_name}
+                    {row.designation || 'Staff'}
                   </td>
                   <td className="py-3.5 px-4 font-mono text-xs text-slate-600 dark:text-slate-300">
                     {row.attendance_date}
@@ -314,20 +317,17 @@ export const Reports = () => {
                       {row.status}
                     </Badge>
                   </td>
-                  <td className="py-3.5 px-4 font-mono text-xs text-slate-600 dark:text-slate-300">
-                    {row.check_in}
+                  <td className="py-3.5 px-4 font-mono text-xs font-medium text-slate-700 dark:text-slate-300">
+                    {row.check_in || '-'}
                   </td>
-                  <td className="py-3.5 px-4 font-mono text-xs text-slate-600 dark:text-slate-300">
-                    {row.check_out}
+                  <td className="py-3.5 px-4 font-mono text-xs font-medium text-slate-700 dark:text-slate-300">
+                    {row.check_out || '-'}
                   </td>
                   <td className="py-3.5 px-4 text-xs font-bold text-slate-800 dark:text-slate-200">
                     {row.total_hours}h
                   </td>
                   <td className="py-3.5 px-4 text-xs font-bold text-indigo-600 dark:text-indigo-400">
                     {row.overtime_hours > 0 ? `+${row.overtime_hours}h` : '-'}
-                  </td>
-                  <td className="py-3.5 px-4 text-xs font-mono text-slate-500">
-                    {row.late_minutes > 0 ? `${row.late_minutes}m` : '-'}
                   </td>
                   <td className="py-3.5 px-4 pr-6 text-xs text-slate-500 dark:text-slate-400 max-w-xs truncate">
                     {row.remarks || '-'}

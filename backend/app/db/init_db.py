@@ -32,14 +32,16 @@ def init_db(db: Optional[Session] = None) -> None:
     try:
         # 2. Check or create default user 'Rajavelu'
         rajavelu_user = db.query(User).filter(
-            (User.username == "Rajavelu") | (User.email == "rajavelu@attendance.local")
+            (User.username == "Rajavelu") | 
+            (User.email == "rajavelu@example.com") |
+            (User.email == "rajavelu@attendance.local")
         ).first()
         
         if not rajavelu_user:
             rajavelu_user = User(
                 username="Rajavelu",
                 full_name="Rajavelu",
-                email="rajavelu@attendance.local",
+                email="rajavelu@example.com",
                 password_hash=get_password_hash("Rajavelu@123"),
                 role=UserRole.ADMIN,
                 is_active=True,
@@ -51,6 +53,7 @@ def init_db(db: Optional[Session] = None) -> None:
             logger.info("Created default user account (username: Rajavelu, password: Rajavelu@123)")
         else:
             rajavelu_user.username = "Rajavelu"
+            rajavelu_user.email = "rajavelu@example.com"
             rajavelu_user.role = UserRole.ADMIN
             rajavelu_user.is_active = True
             rajavelu_user.password_hash = get_password_hash("Rajavelu@123")

@@ -108,20 +108,7 @@ export const Login = () => {
             </Button>
           </form>
 
-          {/* Demo Credential Helper */}
-          <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400">
-            <p className="font-semibold text-slate-700 dark:text-slate-300 mb-2">Default Accounts:</p>
-            <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl">
-              <div className="flex justify-between">
-                <span>Admin:</span>
-                <code className="font-mono text-blue-600 dark:text-blue-400">Rajavel / Admin@123456</code>
-              </div>
-              <div className="flex justify-between">
-                <span>Manager:</span>
-                <code className="font-mono text-blue-600 dark:text-blue-400">manager / Manager@123456</code>
-              </div>
-            </div>
-          </div>
+         
         </div>
       </div>
     </div>

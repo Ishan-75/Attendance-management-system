@@ -8,11 +8,12 @@ from app.core.config import settings
 def get_resolved_database_url() -> str:
     """
     Resolve DATABASE_URL cleanly.
-    If using SQLite with a relative path (e.g. sqlite:///./data/attendance.db),
-    resolve it stably relative to the backend root directory so that working directory
-    differences between local development and Render production never create disconnected DB files.
+    - If using SQLite with a relative path (e.g. sqlite:///./data/attendance.db),
+      resolve it stably relative to the backend root directory for offline/local use.
+    - If using Oracle Cloud MySQL HeatWave / MySQL (mysql+pymysql://...), return directly.
+    - If using PostgreSQL or other databases, return directly.
     """
-    url = settings.DATABASE_URL
+    url = settings.DATABASE_URL.strip()
     if url.startswith("sqlite:///./") or url.startswith("sqlite:///.\\"):
         rel_path = url.split("sqlite:///", 1)[1]  # e.g. './data/attendance.db'
         backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -26,11 +27,15 @@ def get_resolved_database_url() -> str:
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
         return url
+    elif url.startswith("mysql://"):
+        # Auto-upgrade mysql:// to mysql+pymysql:// for PyMySQL driver
+        return url.replace("mysql://", "mysql+pymysql://", 1)
     return url
 
 
 RESOLVED_DATABASE_URL = get_resolved_database_url()
 is_sqlite = RESOLVED_DATABASE_URL.startswith("sqlite")
+is_mysql = RESOLVED_DATABASE_URL.startswith("mysql")
 
 connect_args = {}
 if is_sqlite:
@@ -49,8 +54,20 @@ if is_sqlite:
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.close()
 
+elif is_mysql:
+    # Central Production Database: Oracle Cloud MySQL HeatWave / MySQL
+    engine = create_engine(
+        RESOLVED_DATABASE_URL,
+        pool_size=10,
+        max_overflow=20,
+        pool_recycle=3600,
+        pool_pre_ping=True,
+        pool_timeout=30,
+        echo=False
+    )
+
 else:
-    # MySQL / PostgreSQL configuration
+    # PostgreSQL / Other
     engine = create_engine(
         RESOLVED_DATABASE_URL,
         pool_size=10,

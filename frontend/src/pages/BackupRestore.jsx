@@ -107,7 +107,7 @@ export const BackupRestore = () => {
         '';
 
       const downloadUrl =
-        `${API_BASE_URL}/api/v1/backups/${encodeURIComponent(
+        `${API_BASE_URL}/backups/${encodeURIComponent(
           backup.id
         )}/download`;
 

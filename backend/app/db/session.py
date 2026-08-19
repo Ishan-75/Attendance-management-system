@@ -58,6 +58,11 @@ elif is_mysql:
     # Central Production Database: Oracle Cloud MySQL HeatWave / MySQL
     engine = create_engine(
         RESOLVED_DATABASE_URL,
+        connect_args={
+        "ssl": {
+            "ca": "/path/to/ca.pem"
+        }
+    },
         pool_size=10,
         max_overflow=20,
         pool_recycle=3600,
